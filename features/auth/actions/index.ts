@@ -1,6 +1,7 @@
 "use server";
 import { auth, signIn } from "@/auth";
 import { db } from "@/lib/db";
+import { logger } from "@/lib/logger";
 
 export const getUserById = async (id: string) => {
   try {
@@ -15,7 +16,7 @@ export const getUserById = async (id: string) => {
 
     return user;
   } catch (error) {
-    console.error("Error fetching user by ID:", error);
+    logger.error({ error, userId: id }, "Error fetching user by ID");
     return null;
   }
 };
@@ -29,7 +30,7 @@ export const getAccountByUserId = async (userId: string) => {
     });
     return account;
   } catch (error) {
-    console.log(error);
+    logger.error({ error, userId }, "Error fetching account by user ID");
     return null;
   }
 };

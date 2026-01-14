@@ -1,5 +1,5 @@
 import { SidebarProvider } from "@/components/ui/sidebar";
-import { DashboardSidebar } from "@/features/dashboard/dashboard-sidebar";
+import { DashboardSidebar } from "@/features/dashboard/components/dashboard-sidebar";
 import React from "react";
 
 export default async function DashboardLayout({
