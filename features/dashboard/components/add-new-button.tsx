@@ -19,7 +19,7 @@ function AddNewButton() {
             >
               <Plus size={30} className="transition-transform duration-300 group-hover:rotate-90" />
             </Button>
-            <div className='flex flex-col '>
+            <div className='flex flex-col'>
               <h1 className='text-xl font-bold text-[#e93f3f]'>
                 Add New
               </h1>
@@ -28,9 +28,16 @@ function AddNewButton() {
               </p>
             </div>
           </div>
-
+          <div  className = "relative overflow-hidden">
+            <Image src="/add-new.svg"
+            alt = "Create New Playground"
+            width={150}
+            height={150}
+            className="transition-transform duration-300 group-hover:scale-110"
+            />
+          </div>
+          
     </div>
   )
 }
-
-export default AddNewButton
+export default AddNewButton ;
