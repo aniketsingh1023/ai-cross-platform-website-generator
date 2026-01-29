@@ -6,7 +6,6 @@
 
 generator client {
   provider = "prisma-client-js"
-  
 }
 
 datasource db {
@@ -19,19 +18,36 @@ enum UserRole {
   ADMIN
   PREMIUM_USE
 }
-model User {
-  id        String @id @default(cuid()) @map("_id") 
-  name      String?
-  email     String @unique
-  image     String?
 
-  accounts  Account[]
-  role      UserRole @default(USER)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+enum Templates {
+  REACT
+  NEXTJS
+  EXPRESS
+  VUE
+  ANGULAR
+  HONO
+  SVELTE
+  ASTRO
+  SOLIDJS
+  THREEJS
 }
+
+model User {
+  id    String  @id @default(cuid()) @map("_id")
+  name  String?
+  email String  @unique
+  image String?
+
+  myPlayground     Playground[]
+  staredPlayground Starmark[]
+  accounts         Account[]
+  role             UserRole     @default(USER)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+}
+
 model Account {
-  id                String  @id @default(cuid()) @map("_id") 
+  id                String  @id @default(cuid()) @map("_id")
   userId            String  @map("user_id")
   type              String
   provider          String
@@ -43,11 +59,41 @@ model Account {
   scope             String?
   id_token          String? @map("id_token")
   session_state     String? @map("session_state")
- 
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
- 
+
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
- 
+
   @@unique([provider, providerAccountId])
+}
+
+model Playground {
+  id          String    @id @default(cuid()) @map("_id")
+  title       String
+  description String
+  template    Templates @default(REACT)
+
+  Starmark Starmark[]
+  userId   String
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  //todo : add here template files
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Starmark {
+  id           String  @id @default(cuid()) @map("_id")
+  userId       String
+  playgroundId String
+  isMarked     Boolean
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  playground Playground @relation(fields: [playgroundId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, playgroundId])
 }

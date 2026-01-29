@@ -1,0 +1,7 @@
+# Prettier ignore patterns
+node_modules
+build
+dist
+.next
+out
+coverage
