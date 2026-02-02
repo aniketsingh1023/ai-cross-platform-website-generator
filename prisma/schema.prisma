@@ -26,10 +26,6 @@ enum Templates {
   VUE
   ANGULAR
   HONO
-  SVELTE
-  ASTRO
-  SOLIDJS
-  THREEJS
 }
 
 model User {

@@ -5,10 +5,6 @@ export const TEMPLATE_TYPES = [
   "VUE",
   "ANGULAR",
   "HONO",
-  "SVELTE",
-  "ASTRO",
-  "SOLIDJS",
-  "THREEJS",
 ] as const;
 
 export type TemplateType = typeof TEMPLATE_TYPES[number];

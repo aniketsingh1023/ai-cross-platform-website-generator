@@ -3,11 +3,13 @@
 import { getCurrentUser } from '@/features/auth/actions';
 import { db } from '@/lib/db';
 import { logger } from '@/lib/logger';
-import type { TemplateType } from '@/features/auth/playground/constants';
+import { Templates} from '@prisma/client';
+import { get } from 'http';
+import { Play } from 'next/font/google';
 
 export const createPlayground = async (data: {
   title: string;
-  template: TemplateType;
+  template: Templates;
   description?: string;
   userId: string;
 }) => {
@@ -19,7 +21,7 @@ export const createPlayground = async (data: {
       data: {
         title,
         template, 
-        description,
+        description: description || '',
         userId: user!.id,
       },
     });
@@ -27,6 +29,32 @@ export const createPlayground = async (data: {
     return playground;
   } catch (error) {
     logger.error(error, 'Error creating playground');
-    throw error;
+    return null;
   }
 };
+export const getAllPlaygroundForUser  = async() => {
+  const user = await getCurrentUser();
+  try {
+    const playgrounds = await db.playground.findMany({
+      where:{
+        userId: user!.id
+      },
+      include:{
+        user: true,
+        Starmark:{
+          where:{
+            userId: user?.id
+          },
+          select:{
+            isMarked: true
+          }
+        }
+      },
+    });
+    return playgrounds;
+  } catch(error){
+    logger.error(error, 'Error fetching playgrounds for user');
+    return null;
+  }
+}
+
