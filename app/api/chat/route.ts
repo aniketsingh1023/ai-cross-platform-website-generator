@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
+// Allow up to 60s on Vercel (Hobby plan max)
+export const maxDuration = 60;
+
 // Ollama (local dev)
 const OLLAMA_BASE = process.env.OLLAMA_URL || "http://localhost:11434";
 const OLLAMA_URL = `${OLLAMA_BASE}/api/generate`;

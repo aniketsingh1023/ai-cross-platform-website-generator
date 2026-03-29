@@ -68,33 +68,9 @@ export default function WebsiteGeneratorModal({
     try {
       const selectedStyle = STYLE_PRESETS.find((s) => s.id === stylePreset);
 
-      const systemPrompt = `You are an expert web developer. Generate a complete, beautiful, single-page website based on the user's description.
+      const systemPrompt = `You are an expert web developer. Generate a complete single-page website as ONE HTML file with inline CSS and JS. Style: ${selectedStyle?.label}. Page type: ${pageType}. Return ONLY the HTML code starting with <!DOCTYPE html>. No markdown fences, no explanation. Include: responsive design, CSS Grid/Flexbox, animations, navigation, hero section, Google Fonts, placeholder images from picsum.photos, smooth scroll JS. Pure HTML/CSS/JS only.`;
 
-Style: ${selectedStyle?.label} - ${selectedStyle?.desc}
-Page Type: ${pageType}
-
-IMPORTANT: Return ONLY valid JSON with this exact structure (no markdown, no code fences):
-{
-  "index.html": "<!DOCTYPE html>...",
-  "style.css": "...",
-  "script.js": "..."
-}
-
-Requirements:
-- Create a fully responsive HTML page with modern CSS
-- Use CSS Grid/Flexbox for layouts
-- Add smooth animations and transitions
-- Include a navigation bar, hero section, and relevant content sections
-- Use a professional color palette matching the style preset
-- Add hover effects and interactive elements
-- Make it mobile-responsive with media queries
-- Use modern fonts from Google Fonts
-- Include placeholder images from picsum.photos
-- The JavaScript should add interactivity (smooth scroll, mobile menu, animations on scroll)
-- Write clean, well-structured code
-- DO NOT use any external frameworks (no React, Vue, etc.) - pure HTML/CSS/JS only`;
-
-      setProgress("Generating website with AI...");
+      setProgress("Generating website with AI... This may take up to 30 seconds.");
 
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -107,29 +83,31 @@ Requirements:
               content: `Create a ${pageType.toLowerCase()} website: ${prompt}`,
             },
           ],
-          model: selectedModel,
         }),
       });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.response || errData.error || "AI request failed");
+      }
 
       const data = await res.json();
       setProgress("Processing generated code...");
 
-      let files: Record<string, string>;
-      try {
-        // Try to parse as JSON first
-        const cleaned = data.response
-          .replace(/```json\n?/g, "")
-          .replace(/```\n?/g, "")
-          .trim();
-        files = JSON.parse(cleaned);
-      } catch {
-        // If JSON parsing fails, treat the whole response as HTML
-        files = {
-          "index.html": data.response,
-          "style.css": "",
-          "script.js": "",
-        };
+      // Extract HTML from response (strip markdown fences if any)
+      let html = (data.response || "")
+        .replace(/^```html?\n?/gm, "")
+        .replace(/```$/gm, "")
+        .trim();
+
+      // If it doesn't start with <!DOCTYPE or <html, wrap it
+      if (!html.toLowerCase().startsWith("<!doctype") && !html.toLowerCase().startsWith("<html")) {
+        html = `<!DOCTYPE html><html><head><title>Generated</title></head><body>${html}</body></html>`;
       }
+
+      const files: Record<string, string> = {
+        "index.html": html,
+      };
 
       // Convert to WebContainer file tree format
       const fileTree: Record<string, any> = {
@@ -166,7 +144,7 @@ Requirements:
       onClose();
     } catch (error) {
       console.error("Generation failed:", error);
-      setProgress("Failed to generate. Make sure Ollama is running.");
+      setProgress(`Failed to generate: ${error instanceof Error ? error.message : "Unknown error"}`);
     } finally {
       setIsGenerating(false);
     }
@@ -181,8 +159,7 @@ Requirements:
             AI Website Generator
           </DialogTitle>
           <DialogDescription>
-            Describe the website you want and AI will generate it for you using
-            Ollama.
+            Describe the website you want and AI will generate it for you.
           </DialogDescription>
         </DialogHeader>
 
