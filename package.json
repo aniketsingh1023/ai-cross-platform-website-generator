@@ -5,7 +5,8 @@
   "packageManager": "pnpm@10.24.0",
   "scripts": {
     "dev": "pnpm next dev",
-    "build": "pnpm next build",
+    "postinstall": "prisma generate",
+    "build": "prisma generate && pnpm next build",
     "start": "pnpm next start",
     "lint": "pnpm eslint"
   },
