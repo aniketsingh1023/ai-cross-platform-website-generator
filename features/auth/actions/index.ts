@@ -41,6 +41,6 @@ export const getCurrentUser = async () => {
 };
 
 export const handleSignIn = async (provider: "google" | "github") => {
-  await signIn(provider, { redirectTo: "/" });
+  await signIn(provider, { redirectTo: "/dashboard" });
 };
 

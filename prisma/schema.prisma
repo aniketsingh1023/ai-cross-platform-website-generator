@@ -37,6 +37,7 @@ model User {
   myPlayground     Playground[]
   staredPlayground Starmark[]
   accounts         Account[]
+  chatMessages     ChatMessage[]
   role             UserRole     @default(USER)
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
@@ -70,13 +71,36 @@ model Playground {
   description String
   template    Templates @default(REACT)
 
-  Starmark Starmark[]
-  userId   String
-  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  //todo : add here template files
+  Starmark     Starmark[]
+  templateFile TemplateFile?
+  userId       String
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model TemplateFile {
+  id           String @id @default(cuid()) @map("_id")
+  content      Json
+  playgroundId String @unique
+  playground   Playground @relation(fields: [playgroundId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ChatMessage {
+  id      String @id @default(cuid()) @map("_id")
+  userId  String
+  content String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([content])
 }
 
 model Starmark {

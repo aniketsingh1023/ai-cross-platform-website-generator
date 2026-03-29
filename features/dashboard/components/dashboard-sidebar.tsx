@@ -4,12 +4,14 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  BookOpen,
   Code2,
   Compass,
   FolderPlus,
   History,
   Home,
   LayoutDashboard,
+  Layers,
   Lightbulb,
   type LucideIcon,
   Plus,
@@ -101,6 +103,30 @@ export function DashboardSidebar({
                 <Link href="/dashboard">
                   <LayoutDashboard className="h-4 w-4" />
                   <span>Dashboard</span>
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                asChild
+                isActive={pathname === "/playgrounds"}
+                tooltip="Playgrounds"
+              >
+                <Link href="/playgrounds">
+                  <Layers className="h-4 w-4" />
+                  <span>Playgrounds</span>
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                asChild
+                isActive={pathname === "/docs"}
+                tooltip="Documentation"
+              >
+                <Link href="/docs">
+                  <BookOpen className="h-4 w-4" />
+                  <span>Docs</span>
                 </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
