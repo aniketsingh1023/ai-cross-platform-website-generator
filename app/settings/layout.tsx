@@ -20,7 +20,7 @@ export default async function SettingsLayout({
   };
 
   const formattedPlaygroundData =
-    playgroundData?.map((playground) => ({
+    playgroundData?.map((playground: any) => ({
       id: playground.id,
       name: playground.title,
       starred: playground.Starmark?.[0]?.isMarked || false,

@@ -20,7 +20,7 @@ export default async function DashboardLayout({
     ANGULAR:"Terminal",
   }
 
-  const formattedPlaygroundData = playgroundData?.map((playground) => ({
+  const formattedPlaygroundData = playgroundData?.map((playground: any) => ({
    id:playground.id,
    name:playground.title,
    starred:playground.Starmark?.[0]?.isMarked || false,
