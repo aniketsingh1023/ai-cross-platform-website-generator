@@ -34,7 +34,7 @@ export default async function SettingsPageRoute() {
         image: user.image,
         role: user.role,
         createdAt: user.createdAt.toISOString(),
-        providers: user.accounts.map((a) => a.provider),
+        providers: user.accounts.map((a: any) => a.provider),
       }}
     />
   );
