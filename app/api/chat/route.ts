@@ -7,8 +7,8 @@ const DEFAULT_MODEL = process.env.OLLAMA_MODEL || "codellama:latest";
 const REQUEST_TIMEOUT = 120_000;
 
 // HuggingFace Inference API (free production fallback)
-const HF_API_URL = "https://router.huggingface.co/hf-inference/models";
-const HF_MODEL = "Qwen/Qwen2.5-Coder-1.5B-Instruct";
+const HF_API_URL = "https://router.huggingface.co/v1/chat/completions";
+const HF_MODEL = "Qwen/Qwen2.5-Coder-32B-Instruct";
 
 function buildChatMessages(
   messages: Array<{ role: string; content: string }>,
@@ -78,7 +78,7 @@ async function callHuggingFace(
   const token = process.env.HF_TOKEN;
   if (!token) throw new Error("HF_TOKEN not set");
 
-  const response = await fetch(`${HF_API_URL}/${HF_MODEL}/v1/chat/completions`, {
+  const response = await fetch(HF_API_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

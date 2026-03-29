@@ -4,8 +4,8 @@ const OLLAMA_BASE = process.env.OLLAMA_URL || "http://localhost:11434";
 const OLLAMA_URL = `${OLLAMA_BASE}/api/generate`;
 
 // HuggingFace Inference API (free fallback)
-const HF_API_URL = "https://router.huggingface.co/hf-inference/models";
-const HF_MODEL = "Qwen/Qwen2.5-Coder-1.5B-Instruct";
+const HF_API_URL = "https://router.huggingface.co/v1/chat/completions";
+const HF_MODEL = "Qwen/Qwen2.5-Coder-32B-Instruct";
 
 function detectLanguage(filename: string): string {
   const ext = filename.split(".").pop()?.toLowerCase() || "";
@@ -105,7 +105,7 @@ async function callHFCodeSuggestion(prompt: string): Promise<string> {
   const token = process.env.HF_TOKEN;
   if (!token) throw new Error("HF_TOKEN not set");
 
-  const response = await fetch(`${HF_API_URL}/${HF_MODEL}/v1/chat/completions`, {
+  const response = await fetch(HF_API_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
