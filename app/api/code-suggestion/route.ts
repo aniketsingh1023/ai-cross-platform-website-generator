@@ -3,8 +3,9 @@ import { NextRequest, NextResponse } from "next/server";
 const OLLAMA_BASE = process.env.OLLAMA_URL || "http://localhost:11434";
 const OLLAMA_URL = `${OLLAMA_BASE}/api/generate`;
 
-const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
-const GROQ_MODEL = "llama-3.1-8b-instant";
+// HuggingFace Inference API (free fallback)
+const HF_API_URL = "https://router.huggingface.co/hf-inference/models";
+const HF_MODEL = "Qwen/Qwen2.5-Coder-1.5B-Instruct";
 
 function detectLanguage(filename: string): string {
   const ext = filename.split(".").pop()?.toLowerCase() || "";
@@ -100,20 +101,23 @@ async function checkOllamaHealth(): Promise<boolean> {
   }
 }
 
-async function callGroqCodeSuggestion(prompt: string): Promise<string> {
-  const response = await fetch(GROQ_API_URL, {
+async function callHFCodeSuggestion(prompt: string): Promise<string> {
+  const token = process.env.HF_TOKEN;
+  if (!token) throw new Error("HF_TOKEN not set");
+
+  const response = await fetch(`${HF_API_URL}/${HF_MODEL}/v1/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({
-      model: GROQ_MODEL,
+      model: HF_MODEL,
       messages: [
         {
           role: "system",
           content:
-            "You are an expert code completion assistant. Provide ONLY the code that should be inserted at the cursor position. Do NOT include any explanation, comments about the completion, or markdown formatting. Just raw code.",
+            "You are an expert code completion assistant. Provide ONLY the code that should be inserted at the cursor position. Do NOT include any explanation, comments, or markdown formatting. Just raw code.",
         },
         { role: "user", content: prompt },
       ],
@@ -124,7 +128,7 @@ async function callGroqCodeSuggestion(prompt: string): Promise<string> {
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => "Unknown error");
-    throw new Error(`Groq API returned status ${response.status}: ${errorText}`);
+    throw new Error(`HF API returned ${response.status}: ${errorText}`);
   }
 
   const data = await response.json();
@@ -188,10 +192,10 @@ ${afterCursor}
     const isHealthy = await checkOllamaHealth();
 
     if (!isHealthy) {
-      // Try Groq fallback
-      if (process.env.GROQ_API_KEY) {
+      // Try HuggingFace fallback
+      if (process.env.HF_TOKEN) {
         try {
-          let suggestion = await callGroqCodeSuggestion(prompt);
+          let suggestion = await callHFCodeSuggestion(prompt);
           suggestion = suggestion
             .replace(/^```[\w]*\n?/gm, "")
             .replace(/```$/gm, "")
@@ -200,29 +204,19 @@ ${afterCursor}
             suggestion,
             language,
             framework,
-            provider: "groq",
+            provider: "huggingface",
           });
-        } catch (groqError) {
-          console.error("Groq code suggestion fallback error:", groqError);
+        } catch (hfError) {
+          console.error("HF code suggestion fallback error:", hfError);
           return NextResponse.json(
-            {
-              suggestion: "",
-              language,
-              framework,
-              error: "Both Ollama and Groq are unavailable.",
-            },
+            { suggestion: "", language, framework, error: "AI unavailable." },
             { status: 503 }
           );
         }
       }
 
       return NextResponse.json(
-        {
-          suggestion: "",
-          language,
-          framework,
-          error: "Ollama is not running. Set GROQ_API_KEY for cloud fallback.",
-        },
+        { suggestion: "", language, framework, error: "No AI provider available." },
         { status: 503 }
       );
     }

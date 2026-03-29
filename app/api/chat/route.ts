@@ -1,82 +1,63 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// Configurable Ollama URL - point to your self-hosted instance in production
+// Ollama (local dev)
 const OLLAMA_BASE = process.env.OLLAMA_URL || "http://localhost:11434";
 const OLLAMA_URL = `${OLLAMA_BASE}/api/generate`;
 const DEFAULT_MODEL = process.env.OLLAMA_MODEL || "codellama:latest";
 const REQUEST_TIMEOUT = 120_000;
 
-const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
-const GROQ_MODEL = "llama-3.1-8b-instant";
+// HuggingFace Inference API (free production fallback)
+const HF_API_URL = "https://router.huggingface.co/hf-inference/models";
+const HF_MODEL = "Qwen/Qwen2.5-Coder-1.5B-Instruct";
 
-function buildEnhancePrompt(userMessage: string, fileContext?: string): string {
-  let prompt = `You are a prompt enhancement assistant for coding tasks. Refine the following user request into a clear, specific, and actionable coding prompt. Keep it concise but add any useful technical detail that would help produce better code.
-
-User request: "${userMessage}"`;
-
-  if (fileContext) {
-    prompt += `\n\nRelevant file context:\n\`\`\`\n${fileContext}\n\`\`\``;
-  }
-
-  prompt += `\n\nProvide ONLY the enhanced prompt text. No explanations or meta-commentary.`;
-  return prompt;
-}
-
-function buildChatPrompt(
-  messages: Array<{ role: string; content: string }>,
-  fileContext?: string
-): string {
-  const systemMessage = `You are an expert coding assistant integrated into a code editor. Provide clear, concise, and accurate help with coding tasks. When providing code, use proper formatting. When explaining concepts, be thorough but not verbose.`;
-
-  const recentMessages = messages.slice(-10);
-
-  let prompt = `${systemMessage}\n\n`;
-
-  if (fileContext) {
-    prompt += `Current file context:\n\`\`\`\n${fileContext}\n\`\`\`\n\n`;
-  }
-
-  for (const msg of recentMessages) {
-    const role = msg.role === "user" ? "User" : "Assistant";
-    prompt += `${role}: ${msg.content}\n\n`;
-  }
-
-  prompt += "Assistant: ";
-  return prompt;
-}
-
-function buildGroqMessages(
+function buildChatMessages(
   messages: Array<{ role: string; content: string }>,
   fileContext?: string,
   isEnhance?: boolean
 ): Array<{ role: string; content: string }> {
-  const groqMessages: Array<{ role: string; content: string }> = [];
+  const result: Array<{ role: string; content: string }> = [];
 
   if (isEnhance) {
     const lastMessage = messages[messages.length - 1];
-    let systemContent = `You are a prompt enhancement assistant for coding tasks. Refine the user request into a clear, specific, and actionable coding prompt. Keep it concise but add any useful technical detail that would help produce better code. Provide ONLY the enhanced prompt text. No explanations or meta-commentary.`;
-    if (fileContext) {
-      systemContent += `\n\nRelevant file context:\n\`\`\`\n${fileContext}\n\`\`\``;
-    }
-    groqMessages.push({ role: "system", content: systemContent });
-    groqMessages.push({ role: "user", content: lastMessage.content });
+    let sys = `You are a prompt enhancement assistant for coding tasks. Refine the user request into a clear, specific, actionable coding prompt. Provide ONLY the enhanced prompt text.`;
+    if (fileContext) sys += `\n\nFile context:\n\`\`\`\n${fileContext}\n\`\`\``;
+    result.push({ role: "system", content: sys });
+    result.push({ role: "user", content: lastMessage.content });
   } else {
-    let systemContent = `You are an expert coding assistant integrated into a code editor. Provide clear, concise, and accurate help with coding tasks. When providing code, use proper formatting. When explaining concepts, be thorough but not verbose.`;
-    if (fileContext) {
-      systemContent += `\n\nCurrent file context:\n\`\`\`\n${fileContext}\n\`\`\``;
-    }
-    groqMessages.push({ role: "system", content: systemContent });
-
-    const recentMessages = messages.slice(-10);
-    for (const msg of recentMessages) {
-      groqMessages.push({
+    let sys = `You are an expert coding assistant in a code editor. Provide clear, concise help. Use proper code formatting.`;
+    if (fileContext) sys += `\n\nCurrent file:\n\`\`\`\n${fileContext}\n\`\`\``;
+    result.push({ role: "system", content: sys });
+    for (const msg of messages.slice(-10)) {
+      result.push({
         role: msg.role === "user" ? "user" : "assistant",
         content: msg.content,
       });
     }
   }
 
-  return groqMessages;
+  return result;
+}
+
+function buildOllamaPrompt(
+  messages: Array<{ role: string; content: string }>,
+  fileContext?: string,
+  isEnhance?: boolean
+): string {
+  if (isEnhance) {
+    const lastMessage = messages[messages.length - 1];
+    let p = `You are a prompt enhancement assistant. Refine this request into a clear coding prompt.\n\nUser request: "${lastMessage.content}"`;
+    if (fileContext) p += `\n\nFile context:\n\`\`\`\n${fileContext}\n\`\`\``;
+    p += `\n\nProvide ONLY the enhanced prompt:`;
+    return p;
+  }
+
+  let p = `You are an expert coding assistant. Be concise and use code formatting.\n\n`;
+  if (fileContext) p += `Current file:\n\`\`\`\n${fileContext}\n\`\`\`\n\n`;
+  for (const msg of messages.slice(-10)) {
+    p += `${msg.role === "user" ? "User" : "Assistant"}: ${msg.content}\n\n`;
+  }
+  p += "Assistant: ";
+  return p;
 }
 
 async function checkOllamaHealth(): Promise<boolean> {
@@ -90,18 +71,21 @@ async function checkOllamaHealth(): Promise<boolean> {
   }
 }
 
-async function callGroq(
+async function callHuggingFace(
   messages: Array<{ role: string; content: string }>,
   temperature: number
 ): Promise<string> {
-  const response = await fetch(GROQ_API_URL, {
+  const token = process.env.HF_TOKEN;
+  if (!token) throw new Error("HF_TOKEN not set");
+
+  const response = await fetch(`${HF_API_URL}/${HF_MODEL}/v1/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({
-      model: GROQ_MODEL,
+      model: HF_MODEL,
       messages,
       temperature,
       max_tokens: 2000,
@@ -110,7 +94,7 @@ async function callGroq(
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => "Unknown error");
-    throw new Error(`Groq API returned status ${response.status}: ${errorText}`);
+    throw new Error(`HF API returned ${response.status}: ${errorText}`);
   }
 
   const data = await response.json();
@@ -120,21 +104,16 @@ async function callGroq(
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const {
-      messages,
-      action,
-      fileContext,
-      model,
-    }: {
+    const { messages, action, fileContext, model } = body as {
       messages: Array<{ role: string; content: string }>;
       action?: string;
       fileContext?: string;
       model?: string;
-    } = body;
+    };
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return NextResponse.json(
-        { error: "Messages array is required and must not be empty" },
+        { error: "Messages array is required" },
         { status: 400 }
       );
     }
@@ -142,117 +121,79 @@ export async function POST(request: NextRequest) {
     const isEnhance = action === "enhance";
     const temperature = isEnhance ? 0.3 : 0.7;
 
-    // Quick health check before making the real request
-    const isHealthy = await checkOllamaHealth();
+    // Try Ollama first (local dev or self-hosted)
+    const ollamaHealthy = await checkOllamaHealth();
 
-    if (!isHealthy) {
-      // Try Groq fallback if available
-      if (process.env.GROQ_API_KEY) {
-        try {
-          const groqMessages = buildGroqMessages(
-            messages,
-            fileContext,
-            isEnhance
-          );
-          const responseText = await callGroq(groqMessages, temperature);
-          return NextResponse.json({ response: responseText, provider: "groq" });
-        } catch (groqError) {
-          console.error("Groq fallback error:", groqError);
+    if (ollamaHealthy) {
+      const selectedModel = model || DEFAULT_MODEL;
+      const prompt = buildOllamaPrompt(messages, fileContext, isEnhance);
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+
+      try {
+        const response = await fetch(OLLAMA_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: selectedModel,
+            prompt,
+            stream: false,
+            options: { temperature, num_ctx: 4096, num_predict: 2000 },
+          }),
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeout);
+
+        if (response.ok) {
+          const data = await response.json();
+          return NextResponse.json({
+            response: (data.response || "").trim(),
+            provider: "ollama",
+          });
+        }
+      } catch (e: any) {
+        clearTimeout(timeout);
+        if (e?.name === "AbortError") {
           return NextResponse.json(
-            {
-              response:
-                "Both Ollama and Groq are unavailable. Start Ollama with the desktop app or run `ollama serve`, or set a valid GROQ_API_KEY.",
-              error: "all_providers_offline",
-            },
-            { status: 503 }
+            { response: "Request timed out. Try again.", error: "timeout" },
+            { status: 504 }
           );
         }
       }
-
-      return NextResponse.json(
-        {
-          response:
-            "Ollama is not running. Start it with the Ollama desktop app or run `ollama serve` in your terminal. Alternatively, set a GROQ_API_KEY environment variable for cloud AI fallback.",
-          error: "ollama_offline",
-        },
-        { status: 503 }
-      );
     }
 
-    const selectedModel = model || DEFAULT_MODEL;
-
-    let prompt: string;
-
-    if (isEnhance) {
-      const lastMessage = messages[messages.length - 1];
-      prompt = buildEnhancePrompt(lastMessage.content, fileContext);
-    } else {
-      prompt = buildChatPrompt(messages, fileContext);
-    }
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
-
-    try {
-      const response = await fetch(OLLAMA_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: selectedModel,
-          prompt,
-          stream: false,
-          options: {
-            temperature,
-            num_ctx: 4096,
-            num_predict: 2000,
-          },
-        }),
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeout);
-
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => "Unknown error");
-        throw new Error(
-          `Ollama returned status ${response.status}: ${errorText}`
-        );
-      }
-
-      const data = await response.json();
-      const responseText = (data.response || "").trim();
-
-      return NextResponse.json({ response: responseText, provider: "ollama" });
-    } catch (fetchError: unknown) {
-      clearTimeout(timeout);
-      if (fetchError instanceof Error && fetchError.name === "AbortError") {
+    // Fallback: HuggingFace Inference API (free)
+    if (process.env.HF_TOKEN) {
+      try {
+        const hfMessages = buildChatMessages(messages, fileContext, isEnhance);
+        const responseText = await callHuggingFace(hfMessages, temperature);
+        return NextResponse.json({ response: responseText, provider: "huggingface" });
+      } catch (hfError: any) {
+        console.error("HF fallback error:", hfError);
         return NextResponse.json(
           {
-            response:
-              "The request timed out after 2 minutes. The model may still be loading — try again in a moment.",
-            error: "timeout",
+            response: `AI service error: ${hfError.message}. Make sure Ollama is running locally, or check your HF_TOKEN.`,
+            error: "provider_error",
           },
-          { status: 504 }
+          { status: 503 }
         );
       }
-      throw fetchError;
-    }
-  } catch (error: unknown) {
-    console.error("Chat API error:", error);
-
-    const message =
-      error instanceof Error ? error.message : "An unexpected error occurred";
-
-    let userMessage = `An error occurred: ${message}`;
-    if (message.includes("ECONNREFUSED") || message.includes("fetch failed")) {
-      userMessage =
-        "Could not connect to Ollama. Make sure Ollama is running locally. Start it with the Ollama desktop app or run: ollama serve";
-    } else if (message.includes("model")) {
-      userMessage = `Model error: ${message}. Pull the model with: ollama pull codellama:latest`;
     }
 
     return NextResponse.json(
-      { response: userMessage, error: message },
+      {
+        response:
+          "No AI provider available. Run Ollama locally (`ollama serve`) or set HF_TOKEN for cloud AI.",
+        error: "no_provider",
+      },
+      { status: 503 }
+    );
+  } catch (error: any) {
+    console.error("Chat API error:", error);
+    return NextResponse.json(
+      { response: `Error: ${error.message}`, error: error.message },
       { status: 500 }
     );
   }
