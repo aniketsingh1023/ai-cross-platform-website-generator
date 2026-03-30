@@ -18,6 +18,7 @@ import { getLanguageFromFilename } from "./code-editor";
 import { getTemplateFiles } from "@/lib/templates";
 import type { Terminal as XTerminal } from "@xterm/xterm";
 import { cn } from "@/lib/utils";
+import { useAutoSave } from "@/features/playground/hooks/use-auto-save";
 
 const CodeEditor = dynamic(() => import("./code-editor"), { ssr: false });
 const TerminalComponent = dynamic(
@@ -58,6 +59,18 @@ const CommandPalette = dynamic(
 );
 const FileSearchDialog = dynamic(
   () => import("./file-search").then((mod) => ({ default: mod.FileSearch })),
+  { ssr: false }
+);
+const PackageManager = dynamic(
+  () => import("./package-manager"),
+  { ssr: false }
+);
+const EnvEditor = dynamic(
+  () => import("./env-editor"),
+  { ssr: false }
+);
+const PreviewShare = dynamic(
+  () => import("./preview-share"),
   { ssr: false }
 );
 
@@ -148,11 +161,19 @@ export default function PlaygroundLayout({
   const [isTerminalVisible, setIsTerminalVisible] = useState(true);
   const [isInitialized, setIsInitialized] = useState(false);
 
+  const [isPackageManagerOpen, setIsPackageManagerOpen] = useState(false);
+  const [isEnvEditorOpen, setIsEnvEditorOpen] = useState(false);
+
   // Track per-file dirty state
   const [dirtyFiles, setDirtyFiles] = useState<Set<string>>(new Set());
 
   // Track cursor position for status bar
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
+
+  // Auto-save hook - saves every 30 seconds when there are unsaved changes
+  const { isAutoSaving, lastSaved } = useAutoSave(dirtyFiles.size > 0, () => {
+    handleSave();
+  });
 
   // Initialize playground
   useEffect(() => {
@@ -414,9 +435,109 @@ export default function PlaygroundLayout({
     }
   }, [store]);
 
+  // Get installed packages from package.json in the file tree
+  const getInstalledPackages = useCallback((): Record<string, string> => {
+    const pkgContent = getFileContent(store.files, "package.json");
+    if (!pkgContent) return {};
+    try {
+      const pkg = JSON.parse(pkgContent);
+      return pkg.dependencies || {};
+    } catch {
+      return {};
+    }
+  }, [store.files]);
+
+  const handleInstallPackage = useCallback(
+    (packageName: string) => {
+      const pkgContent = getFileContent(store.files, "package.json");
+      let pkg: any;
+      try {
+        pkg = JSON.parse(pkgContent);
+      } catch {
+        pkg = { name: "playground", version: "1.0.0", dependencies: {} };
+      }
+      if (!pkg.dependencies) pkg.dependencies = {};
+      pkg.dependencies[packageName] = "latest";
+
+      const updatedContent = JSON.stringify(pkg, null, 2);
+      const newFiles = setFileContent(store.files, "package.json", updatedContent);
+      store.setFiles(newFiles);
+      store.updateFileContent("package.json", updatedContent);
+      store.setDirty(true);
+      setDirtyFiles((prev) => new Set(prev).add("package.json"));
+
+      if (webContainer.instance) {
+        webContainer.writeFile("package.json", updatedContent);
+      }
+    },
+    [store, webContainer]
+  );
+
+  const handleUninstallPackage = useCallback(
+    (packageName: string) => {
+      const pkgContent = getFileContent(store.files, "package.json");
+      let pkg: any;
+      try {
+        pkg = JSON.parse(pkgContent);
+      } catch {
+        return;
+      }
+      if (pkg.dependencies) {
+        delete pkg.dependencies[packageName];
+      }
+
+      const updatedContent = JSON.stringify(pkg, null, 2);
+      const newFiles = setFileContent(store.files, "package.json", updatedContent);
+      store.setFiles(newFiles);
+      store.updateFileContent("package.json", updatedContent);
+      store.setDirty(true);
+      setDirtyFiles((prev) => new Set(prev).add("package.json"));
+
+      if (webContainer.instance) {
+        webContainer.writeFile("package.json", updatedContent);
+      }
+    },
+    [store, webContainer]
+  );
+
+  const handleEnvSave = useCallback(
+    (content: string) => {
+      // Create or update .env file in the file tree
+      const newFiles = JSON.parse(JSON.stringify(store.files));
+      newFiles[".env"] = { file: { contents: content } };
+      store.setFiles(newFiles);
+      store.updateFileContent(".env", content);
+      store.setDirty(true);
+      setDirtyFiles((prev) => new Set(prev).add(".env"));
+
+      if (webContainer.instance) {
+        webContainer.writeFile(".env", content);
+      }
+    },
+    [store, webContainer]
+  );
+
   const handleGenerateWebsite = useCallback(
-    async (files: Record<string, any>) => {
-      store.setFiles(files);
+    async (generatedFiles: Record<string, any>) => {
+      // Merge generated files into the existing template file tree
+      // This preserves package.json, config files, etc.
+      const mergedFiles = JSON.parse(JSON.stringify(store.files));
+
+      const mergeInto = (target: Record<string, any>, source: Record<string, any>) => {
+        for (const [name, value] of Object.entries(source)) {
+          if (value.directory) {
+            if (!target[name] || !target[name].directory) {
+              target[name] = { directory: {} };
+            }
+            mergeInto(target[name].directory, value.directory);
+          } else if (value.file) {
+            target[name] = value;
+          }
+        }
+      };
+      mergeInto(mergedFiles, generatedFiles);
+
+      store.setFiles(mergedFiles);
       store.setDirty(true);
 
       const loadContents = (fileObj: Record<string, any>, prefix = "") => {
@@ -429,14 +550,28 @@ export default function PlaygroundLayout({
           }
         }
       };
-      loadContents(files);
+      // Load contents from the generated files so the editor picks them up
+      loadContents(generatedFiles);
 
-      if (files["index.html"]) {
-        store.openFile("index.html");
+      // Open the first generated file
+      const findFirstFile = (obj: Record<string, any>, prefix = ""): string | null => {
+        for (const [name, value] of Object.entries(obj)) {
+          const path = prefix ? `${prefix}/${name}` : name;
+          if (value.file) return path;
+          if (value.directory) {
+            const found = findFirstFile(value.directory, path);
+            if (found) return found;
+          }
+        }
+        return null;
+      };
+      const firstFile = findFirstFile(generatedFiles);
+      if (firstFile) {
+        store.openFile(firstFile);
       }
 
       if (webContainer.instance) {
-        await webContainer.mountFiles(files);
+        await webContainer.mountFiles(mergedFiles);
         await webContainer.installAndRun(terminalRef.current || undefined);
         setIsPreviewVisible(true);
       }
@@ -485,6 +620,8 @@ export default function PlaygroundLayout({
         case "export": handleExport(); break;
         case "github": setIsGitHubModalOpen(true); break;
         case "search": setIsSearchOpen(true); break;
+        case "install-package": setIsPackageManagerOpen(true); break;
+        case "env-vars": setIsEnvEditorOpen(true); break;
         case "format":
           if (store.activeFile) {
             import("./code-formatter").then(({ formatCode, canFormat }) => {
@@ -535,6 +672,8 @@ export default function PlaygroundLayout({
           isChatOpen={isChatOpen}
           hasUnsavedChanges={dirtyFiles.size > 0}
           selectedFileName={activeFileName}
+          previewUrl={webContainer.previewUrl}
+          isRunning={webContainer.isRunning}
         />
 
         <div className="flex-1 overflow-hidden">
@@ -691,6 +830,7 @@ export default function PlaygroundLayout({
         isOpen={isGenModalOpen}
         onClose={() => setIsGenModalOpen(false)}
         onGenerate={handleGenerateWebsite}
+        currentTemplate={store.template}
       />
 
       <GitHubModal
@@ -729,6 +869,21 @@ export default function PlaygroundLayout({
         files={getFlatFileContents()}
         onFileOpen={handleFileSelect}
         onResultClick={(path, _line) => handleFileSelect(path)}
+      />
+
+      <PackageManager
+        isOpen={isPackageManagerOpen}
+        onClose={() => setIsPackageManagerOpen(false)}
+        onInstall={handleInstallPackage}
+        onUninstall={handleUninstallPackage}
+        installedPackages={getInstalledPackages()}
+      />
+
+      <EnvEditor
+        isOpen={isEnvEditorOpen}
+        onClose={() => setIsEnvEditorOpen(false)}
+        envContent={getFileContent(store.files, ".env")}
+        onSave={handleEnvSave}
       />
     </SidebarProvider>
   );

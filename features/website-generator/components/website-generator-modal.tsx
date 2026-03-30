@@ -10,7 +10,6 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -19,13 +18,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Loader2, Wand2, Sparkles, Layout, Palette } from "lucide-react";
+import { Loader2, Wand2, Sparkles, Layout, Palette, Code2 } from "lucide-react";
 import { usePlaygroundStore } from "@/lib/stores/playground-store";
+import { Badge } from "@/components/ui/badge";
 
 interface WebsiteGeneratorModalProps {
   isOpen: boolean;
   onClose: () => void;
   onGenerate: (files: Record<string, any>) => void;
+  currentTemplate: string;
 }
 
 const STYLE_PRESETS = [
@@ -48,10 +49,110 @@ const PAGE_TYPES = [
   "Agency",
 ];
 
+const TEMPLATE_FILE_CONFIG: Record<string, { files: string[]; prompt: string }> = {
+  REACT: {
+    files: ["src/App.jsx", "src/App.css", "src/index.css"],
+    prompt:
+      "Generate a React app with components for: {description}. Style: {style}. Return files in this exact format: ===FILE: path=== then contents. Files to generate: src/App.jsx (main component with all sections using modern React with hooks), src/App.css (all component styles), src/index.css (global styles with @import for Google Fonts). Include responsive design, animations, and clean structure.",
+  },
+  NEXTJS: {
+    files: ["pages/index.js", "styles/globals.css"],
+    prompt:
+      "Generate a Next.js page for: {description}. Style: {style}. Return files in this exact format: ===FILE: path=== then contents. Files to generate: pages/index.js (a Next.js page component with Head, using React hooks), styles/globals.css (all styles with @import for Google Fonts). Include responsive design and animations.",
+  },
+  VUE: {
+    files: ["src/App.vue", "src/main.js", "src/App.css"],
+    prompt:
+      "Generate a Vue 3 app for: {description}. Style: {style}. Return files in this exact format: ===FILE: path=== then contents. Files to generate: src/App.vue (single-file component with template, script setup, and scoped styles), src/main.js (createApp mount), src/App.css (global styles with @import for Google Fonts). Include responsive design and animations.",
+  },
+  EXPRESS: {
+    files: ["index.js", "public/index.html", "public/style.css"],
+    prompt:
+      "Generate an Express.js app for: {description}. Style: {style}. Return files in this exact format: ===FILE: path=== then contents. Files to generate: index.js (Express server with routes that serve static files from public/), public/index.html (full HTML page linking style.css), public/style.css (all styles with Google Fonts). Include responsive design and animations.",
+  },
+  HONO: {
+    files: ["index.js", "public/index.html", "public/style.css"],
+    prompt:
+      "Generate a Hono web app for: {description}. Style: {style}. Return files in this exact format: ===FILE: path=== then contents. Files to generate: index.js (Hono server with serveStatic for public/ and API routes), public/index.html (full HTML page linking style.css), public/style.css (all styles with Google Fonts). Include responsive design and animations.",
+  },
+  ANGULAR: {
+    files: ["src/app.js", "src/style.css", "index.html"],
+    prompt:
+      "Generate an Angular-style app for: {description}. Style: {style}. Return files in this exact format: ===FILE: path=== then contents. Files to generate: src/app.js (main application logic), src/style.css (all styles with Google Fonts), index.html (main HTML entry point). Include responsive design and animations.",
+  },
+};
+
+function parseGeneratedFiles(response: string): Record<string, string> {
+  const files: Record<string, string> = {};
+
+  // Strip markdown fences if present
+  let cleaned = response
+    .replace(/^```[\w]*\n?/gm, "")
+    .replace(/```$/gm, "")
+    .trim();
+
+  // Split on ===FILE: ...=== markers
+  const fileRegex = /===FILE:\s*(.+?)\s*===/g;
+  const parts: Array<{ path: string; startIndex: number }> = [];
+  let match: RegExpExecArray | null;
+
+  while ((match = fileRegex.exec(cleaned)) !== null) {
+    parts.push({ path: match[1].trim(), startIndex: match.index + match[0].length });
+  }
+
+  for (let i = 0; i < parts.length; i++) {
+    const endIndex = i + 1 < parts.length
+      ? cleaned.lastIndexOf("===FILE:", parts[i + 1].startIndex)
+      : cleaned.indexOf("===END===", parts[i].startIndex) !== -1
+        ? cleaned.indexOf("===END===", parts[i].startIndex)
+        : cleaned.length;
+
+    const content = cleaned.slice(parts[i].startIndex, endIndex).trim();
+    files[parts[i].path] = content;
+  }
+
+  return files;
+}
+
+function buildFileTreeEntry(path: string, content: string): { key: string[]; value: any } {
+  const parts = path.split("/");
+  return { key: parts, value: content };
+}
+
+function mergeIntoFileTree(
+  existingTree: Record<string, any>,
+  generatedFiles: Record<string, string>
+): Record<string, any> {
+  const merged = JSON.parse(JSON.stringify(existingTree));
+
+  for (const [filePath, content] of Object.entries(generatedFiles)) {
+    const parts = filePath.split("/");
+    let current = merged;
+
+    // Navigate/create directories for all but the last part
+    for (let i = 0; i < parts.length - 1; i++) {
+      const dirName = parts[i];
+      if (!current[dirName]) {
+        current[dirName] = { directory: {} };
+      } else if (!current[dirName].directory) {
+        current[dirName] = { directory: {} };
+      }
+      current = current[dirName].directory;
+    }
+
+    // Set the file
+    const fileName = parts[parts.length - 1];
+    current[fileName] = { file: { contents: content } };
+  }
+
+  return merged;
+}
+
 export default function WebsiteGeneratorModal({
   isOpen,
   onClose,
   onGenerate,
+  currentTemplate,
 }: WebsiteGeneratorModalProps) {
   const { selectedModel } = usePlaygroundStore();
   const [prompt, setPrompt] = useState("");
@@ -59,6 +160,9 @@ export default function WebsiteGeneratorModal({
   const [stylePreset, setStylePreset] = useState("modern");
   const [isGenerating, setIsGenerating] = useState(false);
   const [progress, setProgress] = useState("");
+
+  const templateKey = currentTemplate?.toUpperCase() || "REACT";
+  const templateConfig = TEMPLATE_FILE_CONFIG[templateKey] || TEMPLATE_FILE_CONFIG.REACT;
 
   const generateWebsite = async () => {
     if (!prompt.trim()) return;
@@ -68,9 +172,22 @@ export default function WebsiteGeneratorModal({
     try {
       const selectedStyle = STYLE_PRESETS.find((s) => s.id === stylePreset);
 
-      const systemPrompt = `You are an expert web developer. Generate a complete single-page website as ONE HTML file with inline CSS and JS. Style: ${selectedStyle?.label}. Page type: ${pageType}. Return ONLY the HTML code starting with <!DOCTYPE html>. No markdown fences, no explanation. Include: responsive design, CSS Grid/Flexbox, animations, navigation, hero section, Google Fonts, placeholder images from picsum.photos, smooth scroll JS. Pure HTML/CSS/JS only.`;
+      const frameworkPrompt = templateConfig.prompt
+        .replace("{description}", prompt)
+        .replace("{style}", selectedStyle?.label || "Modern & Clean");
 
-      setProgress("Generating website with AI... This may take up to 30 seconds.");
+      const systemPrompt = `You are an expert web developer. Generate code for a ${pageType.toLowerCase()} website. ${frameworkPrompt}
+
+IMPORTANT: Return ONLY the files in this exact delimiter format, nothing else:
+===FILE: path/to/file===
+file contents here
+===FILE: another/file===
+file contents here
+===END===
+
+Do not include any explanation, markdown fences, or text outside the file delimiters. Use placeholder images from picsum.photos. Include smooth animations and transitions.`;
+
+      setProgress(`Generating ${templateKey} website with AI... This may take up to 30 seconds.`);
 
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -92,51 +209,31 @@ export default function WebsiteGeneratorModal({
       }
 
       const data = await res.json();
-      setProgress("Processing generated code...");
+      setProgress("Parsing generated files...");
 
-      // Extract HTML from response (strip markdown fences if any)
-      let html = (data.response || "")
-        .replace(/^```html?\n?/gm, "")
-        .replace(/```$/gm, "")
-        .trim();
+      const rawResponse = data.response || "";
+      const generatedFiles = parseGeneratedFiles(rawResponse);
 
-      // If it doesn't start with <!DOCTYPE or <html, wrap it
-      if (!html.toLowerCase().startsWith("<!doctype") && !html.toLowerCase().startsWith("<html")) {
-        html = `<!DOCTYPE html><html><head><title>Generated</title></head><body>${html}</body></html>`;
+      if (Object.keys(generatedFiles).length === 0) {
+        throw new Error("Failed to parse generated files. The AI response did not contain the expected file format.");
       }
 
-      const files: Record<string, string> = {
-        "index.html": html,
-      };
+      setProgress(`Generated ${Object.keys(generatedFiles).length} files. Merging with template...`);
 
-      // Convert to WebContainer file tree format
-      const fileTree: Record<string, any> = {
-        "package.json": {
-          file: {
-            contents: JSON.stringify(
-              {
-                name: "generated-website",
-                version: "1.0.0",
-                scripts: {
-                  dev: "npx serve .",
-                },
-                dependencies: {
-                  serve: "^14.0.0",
-                },
-              },
-              null,
-              2
-            ),
-          },
-        },
-      };
-
-      for (const [fileName, content] of Object.entries(files)) {
-        fileTree[fileName] = {
-          file: {
-            contents: typeof content === "string" ? content : JSON.stringify(content),
-          },
-        };
+      // The onGenerate callback receives only the generated files;
+      // the layout will handle merging with the existing template tree.
+      const fileTree: Record<string, any> = {};
+      for (const [filePath, content] of Object.entries(generatedFiles)) {
+        const parts = filePath.split("/");
+        let current = fileTree;
+        for (let i = 0; i < parts.length - 1; i++) {
+          const dirName = parts[i];
+          if (!current[dirName]) {
+            current[dirName] = { directory: {} };
+          }
+          current = current[dirName].directory;
+        }
+        current[parts[parts.length - 1]] = { file: { contents: content } };
       }
 
       setProgress("Website generated successfully!");
@@ -159,11 +256,25 @@ export default function WebsiteGeneratorModal({
             AI Website Generator
           </DialogTitle>
           <DialogDescription>
-            Describe the website you want and AI will generate it for you.
+            Describe the website you want and AI will generate it for your{" "}
+            <Badge variant="secondary" className="ml-1">
+              <Code2 className="h-3 w-3 mr-1" />
+              {templateKey}
+            </Badge>{" "}
+            project.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
+          {/* Template Info */}
+          <div className="rounded-md bg-muted/50 p-3 text-sm">
+            <span className="font-medium">Target framework:</span>{" "}
+            <span className="text-muted-foreground">{templateKey}</span>
+            <span className="mx-2 text-muted-foreground">|</span>
+            <span className="font-medium">Files:</span>{" "}
+            <span className="text-muted-foreground">{templateConfig.files.join(", ")}</span>
+          </div>
+
           {/* Page Type */}
           <div className="space-y-2">
             <Label className="flex items-center gap-1.5">
@@ -247,7 +358,7 @@ export default function WebsiteGeneratorModal({
             ) : (
               <>
                 <Wand2 className="h-4 w-4" />
-                Generate Website
+                Generate {templateKey} Website
               </>
             )}
           </Button>
