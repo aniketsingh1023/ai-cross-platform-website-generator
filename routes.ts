@@ -7,6 +7,7 @@
 export const publicRoutes: string[] = [
     "/",
     "/docs",
+    "/generator",
 ]
 
 /**
